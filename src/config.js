@@ -1,4 +1,4 @@
-const CONTRACT_NAME = process.env.CONTRACT_NAME ||'near-ft-transfer'
+const CONTRACT_NAME = process.env.CONTRACT_NAME || 'ft.happybits.testnet';
 
 function getConfig(env) {
   switch (env) {

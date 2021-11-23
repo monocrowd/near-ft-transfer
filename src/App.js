@@ -2,19 +2,21 @@ import 'regenerator-runtime/runtime'
 import React from 'react'
 import { login, logout } from './utils'
 import './global.css'
+import Big from 'big.js';
+import { transactions } from "near-api-js";
+
+const BOATLOAD_OF_GAS = Big(3).times(10 ** 13).toFixed();
+const ONE_YOCTO_NEAR = "1";
+const ONE_NEAR = Big(1).times(10 ** 24).toFixed();
 
 import getConfig from './config'
-const { networkId } = getConfig(process.env.NODE_ENV || 'development')
+const { networkId, contractName } = getConfig(process.env.NODE_ENV || 'development')
 
 export default function App() {
-  // use React Hooks to store greeting in component state
-  const [greeting, set_greeting] = React.useState()
+  const [balance, set_balance] = React.useState()
 
   // when the user has not yet interacted with the form, disable the button
-  const [buttonDisabled, setButtonDisabled] = React.useState(true)
-
-  // after submitting the form, we want to show Notification
-  const [showNotification, setShowNotification] = React.useState(false)
+  const [buttonDisabled, setButtonDisabled] = React.useState(false)
 
   // The useEffect hook can be used to fire side-effects during render
   // Learn more: https://reactjs.org/docs/hooks-intro.html
@@ -24,9 +26,10 @@ export default function App() {
       if (window.walletConnection.isSignedIn()) {
 
         // window.contract is set by initContract in index.js
-        window.contract.get_greeting({ account_id: window.accountId })
-          .then(greetingFromContract => {
-            set_greeting(greetingFromContract)
+        window.contract.ft_balance_of({ account_id: window.accountId })
+          .then(val => {
+            val = val / 10 ** 8
+            set_balance(val)
           })
       }
     },
@@ -70,36 +73,98 @@ export default function App() {
       </button>
       <main>
         <h1>
+          MEME Token balance of {window.accountId}
+          <br />
           <label
-            htmlFor="greeting"
+            htmlFor="balance"
             style={{
               color: 'var(--secondary)',
               borderBottom: '2px solid var(--secondary)'
             }}
           >
-            {greeting}
+          {balance}
           </label>
-          {' '/* React trims whitespace around tags; insert literal space character when needed */}
-          {window.accountId}!
         </h1>
         <form onSubmit={async event => {
           event.preventDefault()
 
           // get elements from the form using their id attribute
-          const { fieldset, greeting } = event.target.elements
+          const { buyForm } = event.target.elements
 
-          // hold onto new user-entered value from React's SynthenticEvent for use after `await` call
-          const newGreeting = greeting.value
+          // disable the form while the value gets updated on-chain
+          buyForm.disabled = true
+
+          try {
+            // make an update call to the smart contract
+            await window.contract.buy_tokens(
+              {
+                account_id: window.accountId,
+              },
+              BOATLOAD_OF_GAS,
+              ONE_NEAR
+            )
+          } catch (e) {
+            alert(
+              'Something went wrong! ' +
+              'Maybe you need to sign out and back in? ' +
+              'Check your browser console for more info.'
+            )
+            throw e
+          } finally {
+            buyForm.disabled = false
+          }
+        }}>
+          <fieldset id="buyForm">
+            <div style={{ display: 'flex' }}>
+              <button
+                disabled={buttonDisabled}
+                style={{ borderRadius: '5px 5px 5px 5px', margin: 2 }}
+              >
+                Buy 100 MEME for 1 NEAR
+              </button>
+            </div>
+          </fieldset>
+        </form>
+
+        <form onSubmit={async event => {
+          event.preventDefault()
+
+          // get elements from the form using their id attribute
+          const { fieldset, toAccount, toAmount } = event.target.elements
+
+          const toAccountId = toAccount.value
+          const toAmountVal = toAmount.value
 
           // disable the form while the value gets updated on-chain
           fieldset.disabled = true
 
           try {
-            // make an update call to the smart contract
-            await window.contract.set_greeting({
-              // pass the value that the user entered in the greeting field
-              message: newGreeting
-            })
+            // await window.walletConnection.account().signAndSendTransaction({
+            //   receiverId: contractName,
+            //   actions: [
+            //     transactions.functionCall(
+            //       "storage_deposit", Buffer.from(JSON.stringify({ account_id: toAccountId })), BOATLOAD_OF_GAS,   Big(0.00125).times(10 ** 24).toFixed()
+            //     ),
+            //     transactions.functionCall(
+            //       "ft_transfer",
+            //       Buffer.from(JSON.stringify({
+            //         receiver_id: toAccountId,
+            //         amount: toAmountVal
+            //       })),
+            //       BOATLOAD_OF_GAS,
+            //       ONE_YOCTO_NEAR,
+            //     ),
+            //   ],
+            // });
+
+            await window.contract.send_tokens(
+              {
+                receiver_id: toAccountId,
+                amount: Big(toAmountVal).times(10 ** 8).toFixed()
+              },
+              BOATLOAD_OF_GAS,
+              Big(0.00125).times(10 ** 24).add(ONE_YOCTO_NEAR).toFixed()
+            )
           } catch (e) {
             alert(
               'Something went wrong! ' +
@@ -111,87 +176,46 @@ export default function App() {
             // re-enable the form, whether the call succeeded or failed
             fieldset.disabled = false
           }
-
-          // update local `greeting` variable to match persisted value
-          set_greeting(newGreeting)
-
-          // show Notification
-          setShowNotification(true)
-
-          // remove Notification again after css animation completes
-          // this allows it to be shown again next time the form is submitted
-          setTimeout(() => {
-            setShowNotification(false)
-          }, 11000)
         }}>
           <fieldset id="fieldset">
             <label
-              htmlFor="greeting"
+              htmlFor="toAccount"
               style={{
                 display: 'block',
                 color: 'var(--gray)',
                 marginBottom: '0.5em'
               }}
             >
-              Change greeting
+              Transfer MEME Token to
             </label>
             <div style={{ display: 'flex' }}>
               <input
                 autoComplete="off"
-                defaultValue={greeting}
-                id="greeting"
-                onChange={e => setButtonDisabled(e.target.value === greeting)}
-                style={{ flex: 1 }}
+                defaultValue="testdev.testnet"
+                placeholder="your-friend.testnet"
+                id="toAccount"
+                required={true}
+                style={{ flex: 1, margin: 2 }}
+              />
+              <input
+                autoComplete="off"
+                defaultValue="10"
+                placeholder="Amount"
+                datatype="number"
+                id="toAmount"
+                required={true}
+                style={{ flex: 1, margin: 2 }}
               />
               <button
                 disabled={buttonDisabled}
-                style={{ borderRadius: '0 5px 5px 0' }}
+                style={{ borderRadius: '5px 5px 5px 5px', margin: 2 }}
               >
-                Save
+                Send
               </button>
             </div>
           </fieldset>
         </form>
-        <p>
-          Look at that! A Hello World app! This greeting is stored on the NEAR blockchain. Check it out:
-        </p>
-        <ol>
-          <li>
-            Look in <code>src/App.js</code> and <code>src/utils.js</code> – you'll see <code>get_greeting</code> and <code>set_greeting</code> being called on <code>contract</code>. What's this?
-          </li>
-          <li>
-            Ultimately, this <code>contract</code> code is defined in <code>assembly/main.ts</code> – this is the source code for your <a target="_blank" rel="noreferrer" href="https://docs.near.org/docs/develop/contracts/overview">smart contract</a>.</li>
-          <li>
-            When you run <code>yarn dev</code>, the code in <code>assembly/main.ts</code> gets deployed to the NEAR testnet. You can see how this happens by looking in <code>package.json</code> at the <code>scripts</code> section to find the <code>dev</code> command.</li>
-        </ol>
-        <hr />
-        <p>
-          To keep learning, check out <a target="_blank" rel="noreferrer" href="https://docs.near.org">the NEAR docs</a> or look through some <a target="_blank" rel="noreferrer" href="https://examples.near.org">example apps</a>.
-        </p>
       </main>
-      {showNotification && <Notification />}
     </>
-  )
-}
-
-// this component gets rendered by App after the form is submitted
-function Notification() {
-  const urlPrefix = `https://explorer.${networkId}.near.org/accounts`
-  return (
-    <aside>
-      <a target="_blank" rel="noreferrer" href={`${urlPrefix}/${window.accountId}`}>
-        {window.accountId}
-      </a>
-      {' '/* React trims whitespace around tags; insert literal space character when needed */}
-      called method: 'set_greeting' in contract:
-      {' '}
-      <a target="_blank" rel="noreferrer" href={`${urlPrefix}/${window.contract.contractId}`}>
-        {window.contract.contractId}
-      </a>
-      <footer>
-        <div>✔ Succeeded</div>
-        <div>Just now</div>
-      </footer>
-    </aside>
   )
 }
